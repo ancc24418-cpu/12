@@ -70,10 +70,6 @@ function networkUp() {
     exit 1
   fi
   
-  # Generate genesis block BEFORE starting containers
-  echo -e "${YELLOW}Generating genesis block...${NC}"
-  generateGenesis
-  
   # Start the network
   echo -e "${YELLOW}Starting Docker containers...${NC}"
   cd ..
@@ -91,18 +87,6 @@ function networkUp() {
   cd scripts
   
   echo -e "${GREEN}✅ Network started successfully!${NC}"
-}
-
-function generateGenesis() {
-  echo -e "${YELLOW}Generating genesis block...${NC}"
-  
-  # Generate genesis block for system channel
-  configtxgen -profile HerbionYXOrdererGenesis -channelID system-channel -outputBlock ../channel-artifacts/genesis.block
-  
-  if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to generate genesis block${NC}"
-    exit 1
-  fi
 }
 
 function networkDown() {
@@ -134,35 +118,11 @@ function createChannel() {
     exit 1
   fi
   
-  # CRITICAL FIX: Use osnadmin CLI for channel participation API
-  echo -e "${YELLOW}Creating channel using Channel Participation API...${NC}"
-  
   # Wait for orderer to be ready
   echo -e "${YELLOW}Waiting for orderer to be ready...${NC}"
-  sleep 15
+  sleep 20
   
-  # Create channel using osnadmin (Channel Participation API)
-  docker exec cli osnadmin channel join \
-    --channelID $CHANNEL_NAME \
-    --config-block ./channel-artifacts/${CHANNEL_NAME}.tx \
-    -o orderer.herbionyx.com:7053 \
-    --ca-file /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/herbionyx.com/orderers/orderer.herbionyx.com/msp/tlscacerts/tlsca.herbionyx.com-cert.pem \
-    --client-cert /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/herbionyx.com/orderers/orderer.herbionyx.com/tls/server.crt \
-    --client-key /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/herbionyx.com/orderers/orderer.herbionyx.com/tls/server.key
-  
-  if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to join channel using Channel Participation API${NC}"
-    echo -e "${YELLOW}Trying alternative method...${NC}"
-  fi
-  
-  # Create channel using CLI container with improved connectivity
-  echo -e "${YELLOW}Creating channel using CLI container...${NC}"
-  
-  # Skip ping test and proceed directly to channel creation
-  echo -e "${YELLOW}Skipping connectivity test (ping not available in CLI container)${NC}"
-  echo -e "${YELLOW}Proceeding with channel creation...${NC}"
-  
-  # Verify containers are running
+  # Check if orderer is running
   if ! docker ps --format "table {{.Names}}\t{{.Status}}" | grep -q "orderer.herbionyx.com.*Up"; then
     echo -e "${RED}Orderer container is not running${NC}"
     echo -e "${YELLOW}Available containers:${NC}"
@@ -170,48 +130,59 @@ function createChannel() {
     exit 1
   fi
   
-  # Wait a bit more for orderer to be fully ready
-  echo -e "${YELLOW}Waiting for orderer to be fully ready...${NC}"
-  sleep 10
+  # Create channel using Channel Participation API (Fabric 2.3+)
+  echo -e "${YELLOW}Creating channel using Channel Participation API...${NC}"
   
-  # Create the channel
-  docker exec cli peer channel create \
-    -o orderer.herbionyx.com:7050 \
-    -c $CHANNEL_NAME \
-    --ordererTLSHostnameOverride orderer.herbionyx.com \
-    -f ./channel-artifacts/${CHANNEL_NAME}.tx \
-    --outputBlock ./channel-artifacts/${CHANNEL_NAME}.block \
-    --tls \
-    --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/herbionyx.com/orderers/orderer.herbionyx.com/msp/tlscacerts/tlsca.herbionyx.com-cert.pem
+  # First, create the channel genesis block
+  configtxgen -profile HerbionYXChannel -outputBlock ../channel-artifacts/${CHANNEL_NAME}.block -channelID $CHANNEL_NAME -configPath ${PWD}
   
   if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to create channel${NC}"
-    echo -e "${YELLOW}Checking network connectivity...${NC}"
-    docker exec cli nslookup orderer.herbionyx.com
-    echo -e "${YELLOW}Checking if orderer is listening...${NC}"
-    docker exec cli nc -zv orderer.herbionyx.com 7050 || echo "Orderer not reachable on port 7050"
-    docker exec cli nc -zv orderer.herbionyx.com 7053 || echo "Orderer admin not reachable on port 7053"
-    echo -e "${YELLOW}Checking orderer container status...${NC}"
-    docker logs orderer.herbionyx.com --tail 30
-    echo -e "${YELLOW}Checking CLI container network...${NC}"
-    docker exec cli ip route
-    echo -e "${YELLOW}Checking orderer logs...${NC}"
-    docker logs orderer.herbionyx.com --tail 20
+    echo -e "${RED}Failed to generate channel genesis block${NC}"
     exit 1
   fi
   
-  # Join channel using CLI container
-  echo -e "${YELLOW}Joining channel using CLI container...${NC}"
+  # Join channel using osnadmin (Channel Participation API)
+  echo -e "${YELLOW}Joining channel to orderer using Channel Participation API...${NC}"
+  
+  # Use osnadmin to join the channel
+  docker exec cli osnadmin channel join \
+    --channelID $CHANNEL_NAME \
+    --config-block ./channel-artifacts/${CHANNEL_NAME}.block \
+    -o orderer.herbionyx.com:7053 \
+    --ca-file /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/herbionyx.com/orderers/orderer.herbionyx.com/msp/tlscacerts/tlsca.herbionyx.com-cert.pem \
+    --client-cert /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/herbionyx.com/orderers/orderer.herbionyx.com/tls/server.crt \
+    --client-key /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/herbionyx.com/orderers/orderer.herbionyx.com/tls/server.key
+  
+  if [ $? -ne 0 ]; then
+    echo -e "${YELLOW}Channel Participation API failed, trying alternative approach...${NC}"
+    
+    # Alternative: Use peer channel create (for compatibility)
+    echo -e "${YELLOW}Using peer channel create...${NC}"
+    docker exec cli peer channel create \
+      -o orderer.herbionyx.com:7050 \
+      -c $CHANNEL_NAME \
+      --ordererTLSHostnameOverride orderer.herbionyx.com \
+      -f ./channel-artifacts/${CHANNEL_NAME}.tx \
+      --outputBlock ./channel-artifacts/${CHANNEL_NAME}.block \
+      --tls \
+      --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/herbionyx.com/orderers/orderer.herbionyx.com/msp/tlscacerts/tlsca.herbionyx.com-cert.pem
+    
+    if [ $? -ne 0 ]; then
+      echo -e "${RED}Failed to create channel using peer CLI${NC}"
+      echo -e "${YELLOW}Checking orderer logs...${NC}"
+      docker logs orderer.herbionyx.com --tail 50
+      exit 1
+    fi
+  fi
+  
+  # Join peer to channel
+  echo -e "${YELLOW}Joining peer to channel...${NC}"
   docker exec cli peer channel join -b ./channel-artifacts/${CHANNEL_NAME}.block
   
   if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to join channel${NC}"
+    echo -e "${RED}Failed to join peer to channel${NC}"
     echo -e "${YELLOW}Checking peer logs...${NC}"
     docker logs peer0.org1.herbionyx.com --tail 20
-    echo -e "${YELLOW}Checking CLI logs...${NC}"
-    docker logs cli --tail 20
-    echo -e "${YELLOW}Listing channel artifacts...${NC}"
-    docker exec cli ls -la ./channel-artifacts/
     exit 1
   fi
   
@@ -219,25 +190,20 @@ function createChannel() {
   echo -e "${YELLOW}Updating anchor peers...${NC}"
   configtxgen -profile HerbionYXChannel -outputAnchorPeersUpdate ../channel-artifacts/Org1MSPanchors.tx -channelID $CHANNEL_NAME -asOrg Org1MSP -configPath ${PWD}
   
-  if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to generate anchor peer update transaction${NC}"
-    exit 1
-  fi
-  
-  # Update anchor peers
-  echo -e "${YELLOW}Updating anchor peers...${NC}"
-  docker exec cli peer channel update \
-    -o orderer.herbionyx.com:7050 \
-    -c $CHANNEL_NAME \
-    -f ./channel-artifacts/Org1MSPanchors.tx \
-    --tls \
-    --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/herbionyx.com/orderers/orderer.herbionyx.com/msp/tlscacerts/tlsca.herbionyx.com-cert.pem
-  
-  if [ $? -ne 0 ]; then
-    echo -e "${YELLOW}Warning: Failed to update anchor peers (this may not be critical)${NC}"
-    echo -e "${YELLOW}Channel creation completed, but anchor peer update failed${NC}"
-  else
-    echo -e "${GREEN}✅ Anchor peers updated successfully!${NC}"
+  if [ $? -eq 0 ]; then
+    docker exec cli peer channel update \
+      -o orderer.herbionyx.com:7050 \
+      -c $CHANNEL_NAME \
+      -f ./channel-artifacts/Org1MSPanchors.tx \
+      --ordererTLSHostnameOverride orderer.herbionyx.com \
+      --tls \
+      --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/herbionyx.com/orderers/orderer.herbionyx.com/msp/tlscacerts/tlsca.herbionyx.com-cert.pem
+    
+    if [ $? -eq 0 ]; then
+      echo -e "${GREEN}✅ Anchor peers updated successfully!${NC}"
+    else
+      echo -e "${YELLOW}Warning: Failed to update anchor peers (not critical)${NC}"
+    fi
   fi
   
   echo -e "${GREEN}✅ Channel created and joined successfully!${NC}"
@@ -272,7 +238,7 @@ function deployChaincode() {
   PACKAGE_ID=$(docker exec cli peer lifecycle chaincode queryinstalled --output json | jq -r '.installed_chaincodes[0].package_id')
   echo "Package ID: $PACKAGE_ID"
   
-  if [ -z "$PACKAGE_ID" ]; then
+  if [ -z "$PACKAGE_ID" ] || [ "$PACKAGE_ID" = "null" ]; then
     echo -e "${RED}Failed to get package ID${NC}"
     exit 1
   fi
