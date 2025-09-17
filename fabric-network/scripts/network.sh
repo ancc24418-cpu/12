@@ -93,6 +93,18 @@ function networkUp() {
   echo -e "${GREEN}✅ Network started successfully!${NC}"
 }
 
+function generateGenesis() {
+  echo -e "${YELLOW}Generating genesis block...${NC}"
+  
+  # Generate genesis block for system channel
+  configtxgen -profile HerbionYXOrdererGenesis -channelID system-channel -outputBlock ../channel-artifacts/genesis.block
+  
+  if [ $? -ne 0 ]; then
+    echo -e "${RED}Failed to generate genesis block${NC}"
+    exit 1
+  fi
+}
+
 function networkDown() {
   echo -e "${RED}Stopping HerbionYX Fabric Network...${NC}"
   
@@ -115,7 +127,7 @@ function createChannel() {
   
   # Generate channel configuration transaction
   echo -e "${YELLOW}Generating channel configuration transaction...${NC}"
-  configtxgen -profile HerbionYXChannel -outputCreateChannelTx ../channel-artifacts/${CHANNEL_NAME}.tx -channelID $CHANNEL_NAME
+  configtxgen -profile HerbionYXChannel -outputCreateChannelTx ../channel-artifacts/${CHANNEL_NAME}.tx -channelID $CHANNEL_NAME -configPath ${PWD}
   
   if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to generate channel configuration transaction${NC}"
@@ -205,7 +217,7 @@ function createChannel() {
   
   # Update anchor peers
   echo -e "${YELLOW}Updating anchor peers...${NC}"
-  configtxgen -profile HerbionYXChannel -outputAnchorPeersUpdate ../channel-artifacts/Org1MSPanchors.tx -channelID $CHANNEL_NAME -asOrg Org1MSP
+  configtxgen -profile HerbionYXChannel -outputAnchorPeersUpdate ../channel-artifacts/Org1MSPanchors.tx -channelID $CHANNEL_NAME -asOrg Org1MSP -configPath ${PWD}
   
   if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to generate anchor peer update transaction${NC}"

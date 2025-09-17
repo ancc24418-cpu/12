@@ -19,6 +19,7 @@ mkdir -p ../organizations/peerOrganizations/org1.herbionyx.com/users/Admin@org1.
 mkdir -p ../organizations/fabric-ca/org1
 mkdir -p ../channel-artifacts
 
+echo "Setting FABRIC_CFG_PATH to ${PWD}"
 echo "Generating crypto material using cryptogen..."
 
 # Create cryptogen config
@@ -64,6 +65,11 @@ if ! command -v cryptogen &> /dev/null; then
     echo "cryptogen not found. Please install Hyperledger Fabric binaries."
     exit 1
 fi
+
+# Set FABRIC_CFG_PATH for configtxgen
+export FABRIC_CFG_PATH=${PWD}
+echo "FABRIC_CFG_PATH set to: $FABRIC_CFG_PATH"
+ls -la ${FABRIC_CFG_PATH}/configtx.yaml
 
 # Clean up existing certificates
 rm -rf ../organizations/ordererOrganizations
