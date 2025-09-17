@@ -109,18 +109,21 @@ function networkDown() {
 function createChannel() {
   echo -e "${GREEN}Creating channel: ${CHANNEL_NAME}${NC}"
   
-  # Generate channel configuration transaction
-  echo -e "${YELLOW}Generating channel configuration transaction...${NC}"
-  configtxgen -profile HerbionYXChannel -outputCreateChannelTx ../channel-artifacts/${CHANNEL_NAME}.tx -channelID $CHANNEL_NAME -configPath ${PWD}
+  # Create channel artifacts directory
+  mkdir -p ../channel-artifacts
+  
+  # Generate channel genesis block directly (Fabric 2.3+ approach)
+  echo -e "${YELLOW}Generating channel genesis block...${NC}"
+  configtxgen -profile HerbionYXChannel -outputBlock ../channel-artifacts/${CHANNEL_NAME}.block -channelID $CHANNEL_NAME -configPath ${PWD}
   
   if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to generate channel configuration transaction${NC}"
+    echo -e "${RED}Failed to generate channel genesis block${NC}"
     exit 1
   fi
   
   # Wait for orderer to be ready
   echo -e "${YELLOW}Waiting for orderer to be ready...${NC}"
-  sleep 20
+  sleep 15
   
   # Check if orderer is running
   if ! docker ps --format "table {{.Names}}\t{{.Status}}" | grep -q "orderer.herbionyx.com.*Up"; then
@@ -133,18 +136,7 @@ function createChannel() {
   # Create channel using Channel Participation API (Fabric 2.3+)
   echo -e "${YELLOW}Creating channel using Channel Participation API...${NC}"
   
-  # First, create the channel genesis block
-  configtxgen -profile HerbionYXChannel -outputBlock ../channel-artifacts/${CHANNEL_NAME}.block -channelID $CHANNEL_NAME -configPath ${PWD}
-  
-  if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to generate channel genesis block${NC}"
-    exit 1
-  fi
-  
-  # Join channel using osnadmin (Channel Participation API)
-  echo -e "${YELLOW}Joining channel to orderer using Channel Participation API...${NC}"
-  
-  # Use osnadmin to join the channel
+  # Use osnadmin to join the channel to orderer
   docker exec cli osnadmin channel join \
     --channelID $CHANNEL_NAME \
     --config-block ./channel-artifacts/${CHANNEL_NAME}.block \
@@ -153,21 +145,6 @@ function createChannel() {
     --client-cert /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/herbionyx.com/orderers/orderer.herbionyx.com/tls/server.crt \
     --client-key /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/herbionyx.com/orderers/orderer.herbionyx.com/tls/server.key
   
-  if [ $? -ne 0 ]; then
-    echo -e "${YELLOW}Channel Participation API failed, trying alternative approach...${NC}"
-    
-    # Alternative: Use peer channel create (for compatibility)
-    echo -e "${YELLOW}Using peer channel create...${NC}"
-    docker exec cli peer channel create \
-      -o orderer.herbionyx.com:7050 \
-      -c $CHANNEL_NAME \
-      --ordererTLSHostnameOverride orderer.herbionyx.com \
-      -f ./channel-artifacts/${CHANNEL_NAME}.tx \
-      --outputBlock ./channel-artifacts/${CHANNEL_NAME}.block \
-      --tls \
-      --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/herbionyx.com/orderers/orderer.herbionyx.com/msp/tlscacerts/tlsca.herbionyx.com-cert.pem
-    
-    if [ $? -ne 0 ]; then
       echo -e "${RED}Failed to create channel using peer CLI${NC}"
       echo -e "${YELLOW}Checking orderer logs...${NC}"
       docker logs orderer.herbionyx.com --tail 50
@@ -204,6 +181,8 @@ function createChannel() {
     else
       echo -e "${YELLOW}Warning: Failed to update anchor peers (not critical)${NC}"
     fi
+  else
+    echo -e "${YELLOW}Warning: Failed to generate anchor peer update (not critical)${NC}"
   fi
   
   echo -e "${GREEN}✅ Channel created and joined successfully!${NC}"

@@ -27,18 +27,18 @@ cat > ../config/crypto-config.yaml << EOF
 OrdererOrgs:
   - Name: Orderer
     Domain: herbionyx.com
+    EnableNodeOUs: true
     Specs:
       - Hostname: orderer
         SANS:
           - localhost
           - orderer.herbionyx.com
+          - 127.0.0.1
     CA:
       Country: US
       Province: California
       Locality: San Francisco
       OrganizationalUnit: Hyperledger Fabric
-      StreetAddress: address for org # default nil
-      PostalCode: postalCode for org # default nil
 
 PeerOrgs:
   - Name: Org1
@@ -49,6 +49,7 @@ PeerOrgs:
       SANS:
         - localhost
         - peer0.org1.herbionyx.com
+        - 127.0.0.1
     Users:
       Count: 1
     CA:
@@ -56,8 +57,6 @@ PeerOrgs:
       Province: California
       Locality: San Francisco
       OrganizationalUnit: Hyperledger Fabric
-      StreetAddress: address for org1 # default nil
-      PostalCode: postalCode for org1 # default nil
 EOF
 
 # Generate certificates
